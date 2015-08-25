@@ -1,34 +1,27 @@
-{-|
-See the documentation of 're'.
+{-| Quasi-quoters for "Text.Regex.TDFA" (extended POSIX) regular
+expressions. Refer to that module's documentation for more
+information on supported features.
+
+Quasi-quoters included in this module are:
+
+  - 're' For splicing the expression to compile a regular expression AST
+    to a 'Text.Regex.TDFA.Common.Regex' value.
+  - 'pat' For splicing a regular expression AST of type
+    'Text.Regex.TDFA.Common.Pattern'.
+
 -}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-module Text.Regex.TDFA.QuasiQuoter
-( re
-, unescape
-) where
+{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE QuasiQuotes        #-}
+module Text.Regex.TDFA.QuasiQuoter where
 
 import Prelude
-  ( Maybe(..)
-  , Either(..)
-  , String
-  , (++)
-  , all
-  , otherwise
-  , error
+  ( Either(..)
+  , Maybe(..)
   , const
-  , show
-  )
---
-
-import Numeric
-  ( readHex
-  )
---
-
-import Data.Char
-  ( isHexDigit
-  , chr
+  , error
+  , (++)
+  , Eq(..)
+  , break
   )
 --
 
@@ -38,62 +31,58 @@ import Language.Haskell.TH.Quote
   )
 --
 
-import Text.Regex.TDFA.ReadRegex
-  ( parseRegex
+import Text.Regex.TDFA.TDFA
+  ( patternToRegex
   )
 --
 
-import Text.Regex.TDFA.Pattern
-  ( Pattern(..)
-  , PatternSet(..)
-  , PatternSetCharacterClass(..)
-  , PatternSetCollatingElement(..)
-  , PatternSetEquivalenceClass(..)
-  )
---
-
-import Text.Regex.TDFA.Common
-  ( DoPa(..)
-  )
---
-
-import Data.Typeable
-  ( Typeable
-  )
---
-
-import Data.Data
-  ( Data
-  )
---
-
-deriving instance Typeable PatternSetEquivalenceClass
-deriving instance Data PatternSetEquivalenceClass
-
-deriving instance Typeable PatternSetCollatingElement
-deriving instance Data PatternSetCollatingElement
-
-deriving instance Typeable PatternSetCharacterClass
-deriving instance Data PatternSetCharacterClass
-
-deriving instance Typeable DoPa
-deriving instance Data DoPa
-
-deriving instance Typeable PatternSet
-deriving instance Data PatternSet
-
-deriving instance Typeable Pattern
-deriving instance Data Pattern
+import Text.Regex.TDFA.QuasiQuoter.Internal
 
 -- | Quasi-quoter for "Text.Regex.TDFA" (extended POSIX) regular
---   expressions. Refer to that module's documentation for more
---   information on supported features.
+-- expressions. Refer to that module's documentation for more
+-- information on supported features.
 --
---   See the documentation of 'unescape' for escape sequences this
---   quasi-quoter supports.
+-- See the documentation of 'unescape' for escape sequences this
+-- quasi-quoter supports.
 --
---   @[re|regexp]@ is the parsed 'Text.Regex.TDFA.Pattern.Pattern' (AST)
---   of @regexp@. A parse failure is a compile-time error.
+-- @[re|flags;regexp|]@ splices the expression to compile the AST
+-- (of type 'Text.Regex.TDFA.Common.Pattern') of @regexp@ using the
+-- 'Text.Regex.TDFA.Common.CompOption' and
+-- 'Text.Regex.TDFA.Common.ExecOption' indicated by @flags@. Incorrect
+-- flags or a failure to parse the regular expression is a
+-- compile-time error.
+--
+-- Examples:
+--
+--   - @[re|ga;a+b+c+|]@ has @flags = MCgRaN@ and @regexp = a+b+c+@.
+--
+--   - @[re|;(z*)|]@ has @flags = MCGRaN@ and @regexp = (z*)@.
+--
+-- Every flag name is assigned a unique upper and lower case letter pair.
+-- The uppercase letter indicates the flag to be True ("on"), and the
+-- lowercase letter indicates the flag to be False ("off").
+--
+-- @
+-- Flag name          |  True  |  False  |  Default
+-- -------------------+--------+-------------------
+-- Multiline          |  M     |  m      |  M
+-- Case sensitive     |  C     |  c      |  C
+-- Capture groups     |  G     |  g      |  G
+-- Right associative  |  R     |  r      |  R
+-- Last star greedy   |  A     |  a      |  a
+-- New syntax         |  N     |  n      |  N
+-- @
+--
+-- Refer to 'Text.Regex.TDFA.Common.CompOption' and
+-- 'Text.Regex.TDFA.Common.ExecOption' for the meanings of each flag.
+--
+-- For the significance of associativity see
+-- <https://wiki.haskell.org/Regex_Posix> Section 3 "Types of failure".
+--
+-- The default flags are 'MCGRaN'. Zero or more explicit flags must be
+-- specified in the @flags@ field. Explicit flags take precedence over
+-- default flags. Every explicit flag must occur at most once. If a
+-- flag is explicit the negated flag must not also be.
 --
 re :: QuasiQuoter
 re = QuasiQuoter { quoteExp  = quoter
@@ -102,62 +91,59 @@ re = QuasiQuoter { quoteExp  = quoter
                  , quoteDec  = error "no quoteDec"
                  }
   where
-  quoter txt = dataToExpQ (const Nothing) pat
+  
+  quoter txt = [e|patternToRegex $patternExp $compOptsExp $execOptsExp|]
     where
-    pat = case parseRegex (unescape txt) of
-            Right pat -> pat
-            Left  err -> error (show err)
+    
+    (flagString, patternString) =
+      case break (==';') txt of
+        (flagString, ';':pat) -> (flagString, pat)
+        _ -> error ("Regular expression format must be 'flags;regexp' "
+                   ++ "in '" ++ txt ++ "'")
+    pattern =
+      case compilePattern patternString of
+        Right pat -> pat
+        Left  err -> error ("Error in regular expression '" ++ txt
+                           ++ "': " ++ err)
+    
+    options =
+      case flagStringToOptions flagString of
+        Right opts -> opts
+        Left  err  -> error ("Error in regular expression '" ++ txt
+                            ++ "': " ++ err)
+         
+    (compOpts, execOpts) = optionsToTDFAOptions options
+    patternExp = dataToExpQ (const Nothing) pattern
+    compOptsExp = dataToExpQ (const Nothing) compOpts
+    execOptsExp = dataToExpQ (const Nothing) execOpts
 --
 
--- | Replaces escape sequences with their respective characters. Any
---   sequence not listed will be left as-is.
+-- | Quasi-quoter for "Text.Regex.TDFA" (extended POSIX) regular
+-- expressions. Refer to that module's documentation for more
+-- information on supported features.
 --
--- @
--- Sequence  | Character
--- ----------+--------------------
--- \\\\      | \\
--- \\n       | Newline
--- \\r       | Carriage return
--- \\t       | Horizontal tab
--- \\f       | Form feed
--- \\v       | Vertical tab
--- \\xFFFF   | Code point (in hex)
--- |~]       | |]
--- \\|~]     | |~]
--- @
+-- See the documentation of 'unescape' for escape sequences this
+-- quasi-quoter supports.
 --
--- Note that if you are reading the source file and not the generated
--- Haddock documentation that the backslashes have been doubled up.
+-- @[pat|regexp]@ splices the AST (of type
+-- 'Text.Regex.TDFA.Pattern.Pattern') of @regexp@. A parse failure is a
+-- compile-time error.
 --
-unescape :: String -> String
-unescape = unescaped
+pat :: QuasiQuoter
+pat = QuasiQuoter { quoteExp  = quoter
+                  , quotePat  = error "no quotePat"
+                  , quoteType = error "no quoteType"
+                  , quoteDec  = error "no quoteDec"
+                  }
   where
   
-  delim ('|':'~':']':xs) = Just ("|]", xs)
-  delim _                = Nothing
-  
-  control xxs@(d1:d2:d3:d4:xs)
-    | all isHexDigit ds = Just ([chr v], xs)
-    | otherwise         = Nothing
-    where ds = [d1,d2,d3,d4]
-          (v,_):_ = readHex ds
-  control _ = Nothing
-  
-  escaped ('\\':xs) = Just ("\\", xs)
-  escaped ('n' :xs) = Just ("\n", xs)
-  escaped ('r' :xs) = Just ("\r", xs)
-  escaped ('t' :xs) = Just ("\t", xs)
-  escaped ('f' :xs) = Just ("\f", xs)
-  escaped ('v' :xs) = Just ("\v", xs)
-  escaped ('x' :xs) = control xs
-  escaped ('|':'~':']':xs) = Just ("|~]", xs)
-  escaped _         = Nothing
-  
-  unescaped ('\\':xs)  = case escaped xs of
-                           Just (cs, xs') -> cs ++ unescaped xs'
-                           Nothing        -> '\\' : unescaped xs
-  unescaped xxs@(x:xs) = case delim xxs of
-                           Just (cs, xs') -> cs ++ unescaped xs'
-                           Nothing        -> x : unescaped xs
-  unescaped []         = []
+  quoter txt = dataToExpQ (const Nothing) pattern
+    where
+    
+    pattern =
+      case compilePattern txt of
+        Right pat -> pat
+        Left  err -> error ("Error in regular expression '" ++ txt
+                           ++ "': " ++ err)
 --
+

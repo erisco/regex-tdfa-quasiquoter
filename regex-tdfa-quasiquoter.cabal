@@ -1,5 +1,5 @@
 name:                regex-tdfa-quasiquoter
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            Quasi-quoter for TDFA (extended POSIX) regular
                      expressions.
 description:         Quasi-quoter for TDFA (extended POSIX) regular
@@ -17,11 +17,12 @@ cabal-version:       >=1.10
 source-repository this
   type:         git
   location:     http://github.com/erisco/regex-tdfa-quasiquoter.git
-  tag:          0.1.0.0
+  tag:          0.2.0.0
 
 library
   
   exposed-modules:     Text.Regex.TDFA.QuasiQuoter
+                       Text.Regex.TDFA.QuasiQuoter.Internal
   
   other-extensions:      StandaloneDeriving
                        , DeriveDataTypeable
