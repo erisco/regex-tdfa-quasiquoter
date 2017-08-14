@@ -10,8 +10,7 @@ Quasi-quoters included in this module are:
     'Text.Regex.TDFA.Common.Pattern'.
 
 -}
-{-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE QuasiQuotes        #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Text.Regex.TDFA.QuasiQuoter where
 
 import Prelude
